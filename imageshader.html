@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ethereal Effect</title>
+
+  <link rel="stylesheet" type="text/css" href="style.css">
+  
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+</head>
+
+<body>
+  <canvas id="webgl"></canvas>
+
+  <script type="text/javascript">
+    // Canvas and scene setup
+    const canvas = document.querySelector("canvas#webgl");
+    const scene = new THREE.Scene();
+
+    // Sizes
+    const sizes = {
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+
+    window.addEventListener("resize", () => {
+      sizes.width = window.innerWidth;
+      sizes.height = window.innerHeight;
+
+      // Update camera
+      camera.aspect = sizes.width / sizes.height;
+      camera.updateProjectionMatrix();
+
+      // Update renderer
+      renderer.setSize(sizes.width, sizes.height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    });
+
+    // Camera setup
+    const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 1000);
+    camera.position.set(0, 0, 2);
+    scene.add(camera);
+
+    // Renderer setup
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true });
+    renderer.setSize(sizes.width, sizes.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    // Load texture
+    const loader = new THREE.TextureLoader();
+    const texture = loader.load('https://images.unsplash.com/photo-1538330447121-4c41b85862f5?q=80&w=2574&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D');
+    texture.wrapS = THREE.MirroredRepeatWrapping;
+    texture.wrapT = THREE.MirroredRepeatWrapping;
+
+    // Plane Geometry and Shader Material
+    const planeGeometry = new THREE.PlaneGeometry(1.6, 2.5, 128, 128);
+    const planeAspectRatio = planeGeometry.parameters.width / planeGeometry.parameters.height;
+    const planeMaterial = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec2 vUv;
+
+        void main() {
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+          vUv = uv;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D uTexture;
+        uniform float uTime;
+        uniform float uChromaticIntensity;
+        uniform float uGlowIntensity;
+        uniform float uRedOffset;
+        uniform float uGreenOffset;
+        uniform float uBlueOffset;
+        uniform float uDistortionAmplitude;
+        uniform float uDistortionFrequency;
+        uniform float uUserMousePositionX;
+        uniform float uUserMousePositionY;
+        uniform float uMaskDistortionInnerRadius;
+        uniform float uMaskDistortionOuterRadius;
+        uniform float uMaskChromaticInnerRadius;
+        uniform float uMaskChromaticOuterRadius;
+        uniform float uNoiseScaleX;
+        uniform float uNoiseScaleY;
+        uniform bool uIsFullEffect;
+        uniform float uShimmerNoiseIntensity;
+
+        varying vec2 vUv;
+
+        vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+
+        float snoise(vec2 v){
+          const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                   -0.577350269189626, 0.024390243902439);
+          vec2 i  = floor(v + dot(v, C.yy) );
+          vec2 x0 = v -   i + dot(i, C.xx);
+          vec2 i1;
+          i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+          vec4 x12 = x0.xyxy + C.xxzz;
+          x12.xy -= i1;
+          i = mod(i, 289.0);
+          vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+          + i.x + vec3(0.0, i1.x, 1.0 ));
+          vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy),
+            dot(x12.zw,x12.zw)), 0.0);
+          m = m*m ;
+          m = m*m ;
+          vec3 x = 2.0 * fract(p * C.www) - 1.0;
+          vec3 h = abs(x) - 0.5;
+          vec3 ox = floor(x + 0.5);
+          vec3 a0 = x - ox;
+          m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+          vec3 g;
+          g.x  = a0.x  * x0.x  + h.x  * x0.y;
+          g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+          return 130.0 * dot(m, g);
+        }
+
+        void main() {
+          vec2 noiseInput = vec2(vUv.x * uDistortionFrequency + uTime * 0.2, vUv.y * uDistortionFrequency);
+          float noiseValue = snoise(noiseInput);
+          vec2 distortedUv = vUv + noiseValue * vec2(uNoiseScaleX, uNoiseScaleY);
+
+          vec2 distortedMousePosition = vec2(
+            uUserMousePositionX + snoise(vec2(uUserMousePositionX, uTime * 0.02)) * 0.5,
+            uUserMousePositionY + sin(uUserMousePositionY + uTime * 0.02) * 0.0
+          );
+
+          float distance = length(distortedUv - distortedMousePosition);
+          float smoothingDistortion = uIsFullEffect ? 1.0 : 1.0 - smoothstep(uMaskDistortionInnerRadius, uMaskDistortionOuterRadius, distance);
+          float smoothingChromatic = uIsFullEffect ? 1.0 : 1.0 - smoothstep(uMaskChromaticInnerRadius, uMaskChromaticOuterRadius, distance);
+
+          float wavyX = smoothingDistortion * sin(vUv.x * uDistortionFrequency + uTime) * uDistortionAmplitude;
+          float wavyY = smoothingDistortion * cos(vUv.y * uDistortionFrequency + uTime) * uDistortionAmplitude;
+          vec2 finalUv = vUv + vec2(wavyX, wavyY);
+
+          vec4 originalImage = texture2D(uTexture, vUv);
+          vec4 distortedImage = texture2D(uTexture, finalUv);
+          float redChannel = smoothingChromatic * texture2D(uTexture, finalUv + vec2(uRedOffset, 0.0)).r;
+          float greenChannel = smoothingChromatic * texture2D(uTexture, finalUv + vec2(uGreenOffset, 0.0)).g;
+          float blueChannel = smoothingChromatic * texture2D(uTexture, finalUv + vec2(uBlueOffset, 0.0)).b;
+
+          distortedImage.r = mix(distortedImage.r, redChannel, uChromaticIntensity);
+          distortedImage.g = mix(distortedImage.g, greenChannel, uChromaticIntensity);
+          distortedImage.b = mix(distortedImage.b, blueChannel, uChromaticIntensity);
+
+          distortedImage.r = clamp(distortedImage.r, 0.0, 1.0);
+          distortedImage.g = clamp(distortedImage.g, 0.0, 1.0);
+          distortedImage.b = clamp(distortedImage.b, 0.0, 1.0);
+
+          vec2 shimmerInput = finalUv * 20.0 + uTime * 0.01;
+          float shimmerNoise = snoise(shimmerInput);
+          float particleFlicker = fract(shimmerNoise * 50.0);
+          float shimmerIntensity = 1.0 + particleFlicker * uShimmerNoiseIntensity;
+          vec4 shimmeredImage = distortedImage * shimmerIntensity;
+
+          vec4 blurredShimmer = texture2D(uTexture, finalUv * 1.02) * uGlowIntensity;
+          vec4 glowingShimmer = shimmeredImage + blurredShimmer;
+
+          vec4 finalColor = mix(originalImage, distortedImage, smoothingDistortion * 1.5);  
+          finalColor = mix(finalColor, glowingShimmer, smoothingDistortion); 
+
+          gl_FragColor = finalColor;
+        }
+      `,
+      uniforms: {
+        uTexture: new THREE.Uniform(texture),
+        uTime: new THREE.Uniform(0),
+        uChromaticIntensity: new THREE.Uniform(0.8),
+        uRedOffset: new THREE.Uniform(0.01),
+        uGreenOffset: new THREE.Uniform(0.03),
+        uBlueOffset: new THREE.Uniform(0.04),
+        uDistortionAmplitude: new THREE.Uniform(0.09),
+        uDistortionFrequency: new THREE.Uniform(1.7),
+        uUserMousePositionX: new THREE.Uniform(0),
+        uUserMousePositionY: new THREE.Uniform(0),
+        uMaskDistortionOuterRadius: new THREE.Uniform(0.3),
+        uMaskDistortionInnerRadius: new THREE.Uniform(0.21),
+        uMaskChromaticOuterRadius: new THREE.Uniform(0.4),
+        uMaskChromaticInnerRadius: new THREE.Uniform(0.31),
+        uNoiseScaleX: new THREE.Uniform(0.5),
+        uNoiseScaleY: new THREE.Uniform(0.1),
+        uIsFullEffect: new THREE.Uniform(false),
+        uGlowIntensity: new THREE.Uniform(0.31),
+        uShimmerNoiseIntensity: new THREE.Uniform(0.4)
+      }
+    });
+
+    // Plane Mesh
+    const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+    scene.add(plane);
+
+    // Mouse interaction
+    const userMousePosition = {
+      clientX: null,
+      clientY: null,
+    };
+
+    window.addEventListener('pointermove', (event) => {
+      userMousePosition.clientX = (event.clientX / sizes.width) * 2 - 1 * planeAspectRatio;
+      userMousePosition.clientY = 1 - (event.clientY / sizes.height) * planeAspectRatio * 2;
+    });
+
+    // Animation loop
+    const clock = new THREE.Clock();
+
+    const tick = () => {
+      const elapsedTime = clock.getElapsedTime();
+
+      plane.material.uniforms.uTime.value = elapsedTime * 0.01;
+      plane.material.uniforms.uUserMousePositionX.value = userMousePosition.clientX;
+      plane.material.uniforms.uUserMousePositionY.value = userMousePosition.clientY;
+
+      renderer.render(scene, camera);
+
+      window.requestAnimationFrame(tick);
+    }
+
+    tick();
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,18 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+}
+
+#webgl {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  background-color: #e0e7e9;
+}
+
